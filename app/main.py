@@ -35,14 +35,17 @@ async def home(request: Request):
     solar_term, solar_desc = get_current_solar_term()
     provinces = get_all_provinces()
     cuisines = get_all_cuisines()
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "season": season,
-        "solar_term": solar_term,
-        "solar_desc": solar_desc,
-        "provinces": provinces,
-        "cuisines": cuisines,
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "season": season,
+            "solar_term": solar_term,
+            "solar_desc": solar_desc,
+            "provinces": provinces,
+            "cuisines": cuisines,
+        },
+    )
 
 
 @app.get("/api/recommend")
