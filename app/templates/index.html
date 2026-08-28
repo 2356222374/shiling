@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>食令 - 今天吃什么</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app">
+
+        <!-- ====== 首页 ====== -->
+        <div class="page active" id="page-home">
+            <header class="header">
+                <div class="header-top">
+                    <h1 class="logo">食令</h1>
+                    <span class="season-badge">{{ solar_term }} · {{ season }}</span>
+                </div>
+                <p class="header-desc">{{ solar_desc }}</p>
+            </header>
+
+            <section class="filter-section">
+                <div class="filter-row">
+                    <label>你在哪里</label>
+                    <select id="province-select">
+                        <option value="">全国</option>
+                        {% for p in provinces %}
+                        <option value="{{ p }}">{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="taste-panel">
+                    <label>口味偏好 <button class="btn-save-taste" id="btn-save-taste">保存为我的口味</button></label>
+                    <div class="taste-sliders">
+                        <div class="taste-item"><span>辣</span><input type="range" id="taste-spicy" min="0" max="5" value="3"><span class="taste-val" id="val-spicy">3</span></div>
+                        <div class="taste-item"><span>甜</span><input type="range" id="taste-sweet" min="0" max="5" value="3"><span class="taste-val" id="val-sweet">3</span></div>
+                        <div class="taste-item"><span>咸</span><input type="range" id="taste-salty" min="0" max="5" value="3"><span class="taste-val" id="val-salty">3</span></div>
+                        <div class="taste-item"><span>酸</span><input type="range" id="taste-sour" min="0" max="5" value="3"><span class="taste-val" id="val-sour">3</span></div>
+                    </div>
+                </div>
+                <button class="btn-recommend" id="btn-recommend">今天吃什么？</button>
+                <button class="btn-random" id="btn-random">随便来一个</button>
+            </section>
+
+            <section class="search-section">
+                <input type="text" id="search-input" placeholder="搜菜名、食材、菜系...">
+            </section>
+
+            <nav class="page-tabs">
+                <button class="page-tab active" data-tab="recommend">推荐</button>
+                <button class="page-tab" data-tab="favorites">收藏 <span class="tab-count" id="fav-count"></span></button>
+                <button class="page-tab" data-tab="history">最近 <span class="tab-count" id="hist-count"></span></button>
+            </nav>
+
+            <section class="tab-content active" id="tab-recommend">
+                <div class="results-section">
+                    <div class="results-header" id="results-header" style="display:none;">
+                        <h2>为你推荐</h2>
+                        <span class="results-meta" id="results-meta"></span>
+                    </div>
+                    <div class="dish-list" id="dish-list"></div>
+                </div>
+            </section>
+            <section class="tab-content" id="tab-favorites">
+                <div class="results-section">
+                    <div class="results-header" style="display:flex;"><h2>我的收藏</h2><span class="results-meta" id="fav-meta"></span></div>
+                    <div class="dish-list" id="fav-list"></div>
+                </div>
+            </section>
+            <section class="tab-content" id="tab-history">
+                <div class="results-section">
+                    <div class="results-header" style="display:flex;"><h2>浏览历史</h2><button class="btn-clear-history" id="btn-clear-history">清空</button></div>
+                    <div class="dish-list" id="history-list"></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ====== 发现页 ====== -->
+        <div class="page" id="page-discover">
+            <header class="header header-simple">
+                <h1 class="header-title">发现</h1>
+            </header>
+
+            <nav class="discover-tabs">
+                <button class="discover-tab active" data-dtab="calendar">时令日历</button>
+                <button class="discover-tab" data-dtab="map">菜系地图</button>
+            </nav>
+
+            <!-- 时令日历 -->
+            <section class="discover-content active" id="dtab-calendar">
+                <div class="solar-grid" id="solar-grid"></div>
+                <div class="season-dishes-section" id="season-dishes-section" style="display:none;">
+                    <div class="results-header" style="display:flex;">
+                        <h2 id="season-dishes-title">当季推荐</h2>
+                        <span class="results-meta" id="season-dishes-meta"></span>
+                    </div>
+                    <div class="dish-list" id="season-dishes-list"></div>
+                </div>
+            </section>
+
+            <!-- 菜系地图 -->
+            <section class="discover-content" id="dtab-map">
+                <div class="map-province-grid" id="map-province-grid"></div>
+                <div class="map-dishes-section" id="map-dishes-section" style="display:none;">
+                    <div class="results-header" style="display:flex;">
+                        <h2 id="map-dishes-title">特色菜</h2>
+                        <span class="results-meta" id="map-dishes-meta"></span>
+                    </div>
+                    <div class="dish-list" id="map-dishes-list"></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ====== 我的页 ====== -->
+        <div class="page" id="page-me">
+            <header class="header header-simple">
+                <h1 class="header-title">我的</h1>
+            </header>
+
+            <section class="profile-section">
+                <div class="profile-card">
+                    <div class="profile-avatar" id="profile-avatar">食</div>
+                    <div class="profile-info">
+                        <div class="profile-name" id="profile-name">食令用户</div>
+                        <div class="profile-desc" id="profile-desc">还没有设置口味档案</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 口味档案 -->
+            <section class="me-section">
+                <h3 class="me-section-title">口味档案</h3>
+                <div class="taste-profile" id="taste-profile">
+                    <p class="empty-tip">还没有保存口味偏好<br>在首页调整口味滑块后点「保存为我的口味」</p>
+                </div>
+            </section>
+
+            <!-- 统计 -->
+            <section class="me-section">
+                <h3 class="me-section-title">我的数据</h3>
+                <div class="me-stats">
+                    <div class="me-stat"><div class="me-stat-val" id="stat-fav">0</div><div class="me-stat-label">收藏</div></div>
+                    <div class="me-stat"><div class="me-stat-val" id="stat-hist">0</div><div class="me-stat-label">浏览</div></div>
+                    <div class="me-stat"><div class="me-stat-val" id="stat-province">-</div><div class="me-stat-label">家乡</div></div>
+                </div>
+            </section>
+
+            <!-- 口味修改 -->
+            <section class="me-section">
+                <h3 class="me-section-title">修改口味</h3>
+                <div class="me-taste-edit">
+                    <div class="taste-sliders">
+                        <div class="taste-item"><span>辣</span><input type="range" id="me-spicy" min="0" max="5" value="3"><span class="taste-val" id="me-val-spicy">3</span></div>
+                        <div class="taste-item"><span>甜</span><input type="range" id="me-sweet" min="0" max="5" value="3"><span class="taste-val" id="me-val-sweet">3</span></div>
+                        <div class="taste-item"><span>咸</span><input type="range" id="me-salty" min="0" max="5" value="3"><span class="taste-val" id="me-val-salty">3</span></div>
+                        <div class="taste-item"><span>酸</span><input type="range" id="me-sour" min="0" max="5" value="3"><span class="taste-val" id="me-val-sour">3</span></div>
+                    </div>
+                    <div class="filter-row" style="margin-top:8px;">
+                        <label>家乡省份</label>
+                        <select id="me-province">
+                            <option value="">未设置</option>
+                            {% for p in provinces %}
+                            <option value="{{ p }}">{{ p }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button class="btn-recommend" id="btn-save-profile" style="margin-top:10px;">保存口味档案</button>
+                </div>
+            </section>
+        </div>
+
+        <!-- 菜品详情弹窗 -->
+        <div class="modal-overlay" id="modal-overlay" style="display:none;">
+            <div class="modal-content" id="modal-content"></div>
+        </div>
+
+        <!-- 底部导航栏 -->
+        <nav class="bottom-nav">
+            <button class="nav-item active" data-page="home">
+                <span class="nav-icon">&#127858;</span>
+                <span class="nav-label">首页</span>
+            </button>
+            <button class="nav-item" data-page="discover">
+                <span class="nav-icon">&#128269;</span>
+                <span class="nav-label">发现</span>
+            </button>
+            <button class="nav-item" data-page="me">
+                <span class="nav-icon">&#128100;</span>
+                <span class="nav-label">我的</span>
+            </button>
+        </nav>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

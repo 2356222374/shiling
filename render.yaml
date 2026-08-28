@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: shiling
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/cuisines
+    envVars:
+      - key: PORT
+        value: "8000"
