@@ -3,8 +3,8 @@
 MVP v0.2: 口味档案 + 时令日历 + 菜系地图
 """
 
-from datetime import datetime, timezone
-from collections import defaultdict
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,31 +22,29 @@ from app.recommend import (
     get_solar_terms_data,
     get_dishes_by_season,
 )
+from app.stats import get_client_ip, get_stats_summary, init_db, record_visit
 
 BASE_DIR = Path(__file__).parent
 
-app = FastAPI(title="食令 - 智能选菜助手", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="食令 - 智能选菜助手", version="0.2.0", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-# --- 访问统计（内存级，重启清零） ---
-_stats = {
-    "started_at": datetime.now(timezone.utc).isoformat(),
-    "page_views": 0,
-    "unique_ips": set(),
-    "api_calls": defaultdict(int),
-    "daily_pv": defaultdict(int),
-}
-
 
 def _track(request: Request, endpoint: str = "page"):
-    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    _stats["page_views"] += 1
-    _stats["unique_ips"].add(ip)
-    _stats["api_calls"][endpoint] += 1
-    _stats["daily_pv"][today] += 1
+    record_visit(
+        ip=get_client_ip(request),
+        endpoint=endpoint,
+        user_agent=request.headers.get("user-agent", ""),
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,9 +89,11 @@ async def api_recommend(
 
 @app.get("/api/search")
 async def api_search(
+    request: Request,
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     limit: int = Query(20, ge=1, le=50),
 ):
+    _track(request, "search")
     results = search_dishes(keyword, limit)
     return {"code": 0, "data": {"dishes": results, "total": len(results)}}
 
@@ -109,35 +109,40 @@ async def api_provinces():
 
 
 @app.get("/api/province/{province}")
-async def api_province_dishes(province: str, limit: int = Query(20, ge=1, le=50)):
+async def api_province_dishes(
+    request: Request,
+    province: str,
+    limit: int = Query(20, ge=1, le=50),
+):
+    _track(request, "province")
     dishes = get_dishes_by_province(province, limit)
     return {"code": 0, "data": {"province": province, "dishes": dishes, "total": len(dishes)}}
 
 
 @app.get("/api/solar-terms")
-async def api_solar_terms():
+async def api_solar_terms(request: Request):
+    _track(request, "solar-terms")
     data = get_solar_terms_data()
     return {"code": 0, "data": data}
 
 
 @app.get("/api/season/{season}")
-async def api_season_dishes(season: str, count: int = Query(10, ge=1, le=30)):
+async def api_season_dishes(
+    request: Request,
+    season: str,
+    count: int = Query(10, ge=1, le=30),
+):
+    _track(request, "season")
     dishes = get_dishes_by_season(season, count)
     return {"code": 0, "data": {"season": season, "dishes": dishes}}
 
 
 @app.get("/api/stats")
-async def api_stats(request: Request, key: str = Query(None)):
+async def api_stats(
+    key: str = Query(None),
+    recent: int = Query(50, ge=1, le=200),
+    ips: int = Query(50, ge=1, le=200),
+):
     if key != "shiling2026":
         return {"code": 403, "msg": "需要密钥，访问 /api/stats?key=shiling2026"}
-    daily = dict(sorted(_stats["daily_pv"].items(), reverse=True)[:7])
-    return {
-        "code": 0,
-        "data": {
-            "started_at": _stats["started_at"],
-            "total_page_views": _stats["page_views"],
-            "unique_visitors": len(_stats["unique_ips"]),
-            "api_calls": dict(_stats["api_calls"]),
-            "daily_pv_last_7days": daily,
-        },
-    }
+    return {"code": 0, "data": get_stats_summary(recent_limit=recent, ip_limit=ips)}
