@@ -1,10 +1,12 @@
-"""访问统计 - SQLite 持久化"""
+"""访问统计 - SQLite 持久化（写入走后台线程，不阻塞请求）"""
 
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from queue import Queue
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = Path(os.getenv("STATS_DB_PATH", str(BASE_DIR / "data" / "stats.db")))
@@ -47,13 +49,37 @@ def _connect():
         conn.close()
 
 
+_write_queue: Queue = Queue()
+_writer_started = False
+
+
+def _writer_loop():
+    while True:
+        item = _write_queue.get()
+        if item is None:
+            break
+        try:
+            with _connect() as conn:
+                conn.execute(
+                    "INSERT INTO visits (ip, endpoint, user_agent, visited_at, visit_date) VALUES (?, ?, ?, ?, ?)",
+                    item,
+                )
+        except Exception:
+            pass
+
+
+def _ensure_writer():
+    global _writer_started
+    if not _writer_started:
+        _writer_started = True
+        t = threading.Thread(target=_writer_loop, daemon=True)
+        t.start()
+
+
 def record_visit(ip: str, endpoint: str, user_agent: str = ""):
+    _ensure_writer()
     now = _utc_now()
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO visits (ip, endpoint, user_agent, visited_at, visit_date) VALUES (?, ?, ?, ?, ?)",
-            (ip, endpoint, user_agent[:200], _utc_iso(now), now.strftime("%Y-%m-%d")),
-        )
+    _write_queue.put((ip, endpoint, user_agent[:200], _utc_iso(now), now.strftime("%Y-%m-%d")))
 
 
 def get_client_ip(request) -> str:

@@ -37,10 +37,20 @@ const store = {
 
 function updateTabCounts() {
   const fc = $("#fav-count"), hc = $("#hist-count");
-  if (fc) fc.textContent = store.getFavorites().length || "";
-  if (hc) hc.textContent = store.getHistory().length || "";
+  const favLen = store.getFavorites().length;
+  const histLen = store.getHistory().length;
+  if (fc) fc.textContent = favLen || "";
+  if (hc) hc.textContent = histLen || "";
 }
 updateTabCounts();
+
+// ============================================================
+//  全局菜品缓存（收藏/取消收藏时查找用）
+// ============================================================
+let _dishCache = [];
+function cacheDishes(arr) {
+  arr.forEach((d) => { if (!_dishCache.find((c) => c.id === d.id)) _dishCache.push(d); });
+}
 
 // ============================================================
 //  底部导航
@@ -82,7 +92,7 @@ $$(".page-tab").forEach((tab) => {
   if (ms && ml) ms.addEventListener("input", () => (ml.textContent = ms.value));
 });
 
-// 口味档案自动加载
+// 口味档案自动加载到 UI
 (function loadProfile() {
   const p = store.getProfile();
   if (!p) return;
@@ -131,6 +141,8 @@ $("#btn-save-profile").addEventListener("click", () => saveProfileFromUI("me"));
 // ============================================================
 //  推荐
 // ============================================================
+let _lastRecommendHtml = "";
+
 async function fetchRecommend(count = 5) {
   const province = $("#province-select").value;
   const params = new URLSearchParams({
@@ -143,24 +155,38 @@ async function fetchRecommend(count = 5) {
   try {
     const res = await fetch(`${API}/recommend?${params}`);
     const json = await res.json();
+    cacheDishes(json.data.dishes);
     renderResults(json.data);
-  } catch { $("#dish-list").innerHTML = `<p class="loading" style="color:#e85d3a">网络错误，请重试</p>`; }
+    _lastRecommendHtml = $("#dish-list").innerHTML;
+  } catch {
+    $("#dish-list").innerHTML = `<p class="loading" style="color:#e85d3a">网络错误，请重试</p>`;
+  }
 }
 $("#btn-recommend").addEventListener("click", () => fetchRecommend(5));
 $("#btn-random").addEventListener("click", () => fetchRecommend(1));
 
 // ============================================================
-//  搜索
+//  搜索（修复：清空时恢复推荐结果）
 // ============================================================
 let searchTimer;
 $("#search-input").addEventListener("input", (e) => {
   clearTimeout(searchTimer);
   const kw = e.target.value.trim();
-  if (!kw) return;
+  if (!kw) {
+    if (_lastRecommendHtml) {
+      $("#results-header").style.display = "flex";
+      $("#results-meta").textContent = "推荐结果";
+      $("#dish-list").innerHTML = _lastRecommendHtml;
+    }
+    return;
+  }
   searchTimer = setTimeout(async () => {
-    const res = await fetch(`${API}/search?keyword=${encodeURIComponent(kw)}`);
-    const json = await res.json();
-    renderSearchResults(json.data.dishes);
+    try {
+      const res = await fetch(`${API}/search?keyword=${encodeURIComponent(kw)}`);
+      const json = await res.json();
+      cacheDishes(json.data.dishes);
+      renderSearchResults(json.data.dishes, kw);
+    } catch {}
   }, 400);
 });
 
@@ -173,27 +199,37 @@ function showLoading() {
 }
 
 const seasonCn = { spring: "春", summer: "夏", autumn: "秋", winter: "冬" };
+
 function renderResults(data) {
   $("#results-header").style.display = "flex";
   $("#results-meta").textContent = `${data.province} · ${data.solar_term} · ${seasonCn[data.season] || data.season}季`;
   renderDishList($("#dish-list"), data.dishes, true);
 }
-function renderSearchResults(dishes) {
+
+function renderSearchResults(dishes, kw) {
   $("#results-header").style.display = "flex";
-  $("#results-meta").textContent = `找到 ${dishes.length} 道菜`;
+  if (dishes.length === 0) {
+    $("#results-meta").textContent = `"${kw}" 没有结果`;
+    $("#dish-list").innerHTML = `<p class="empty-tip">没找到"${kw}"相关菜品<br>试试其他关键词</p>`;
+    return;
+  }
+  $("#results-meta").textContent = `搜索"${kw}" · ${dishes.length} 道菜`;
   renderDishList($("#dish-list"), dishes, false);
 }
+
 function renderFavorites() {
   const favs = store.getFavorites();
   $("#fav-meta").textContent = `${favs.length} 道菜`;
   if (!favs.length) { $("#fav-list").innerHTML = `<p class="empty-tip">还没有收藏<br>点击菜品心形即可收藏</p>`; return; }
   renderDishList($("#fav-list"), favs, false);
 }
+
 function renderHistory() {
   const hist = store.getHistory();
   if (!hist.length) { $("#history-list").innerHTML = `<p class="empty-tip">还没有浏览记录</p>`; return; }
   renderDishList($("#history-list"), hist, false);
 }
+
 $("#btn-clear-history").addEventListener("click", () => { store.clearHistory(); renderHistory(); });
 
 function renderDishList(container, dishes, showScore) {
@@ -208,7 +244,7 @@ function renderDishList(container, dishes, showScore) {
       <div class="dish-card-top">
         <span class="dish-name">${d.name}</span>
         <div class="dish-card-actions">
-          ${showScore ? `<span class="dish-score">匹配 ${d.match_score}</span>` : ""}
+          ${showScore && d.match_score ? `<span class="dish-score">匹配 ${d.match_score}</span>` : ""}
           <span class="fav-icon ${isFav ? "active" : ""}" onclick="event.stopPropagation();toggleFavCard(${d.id},this)">${isFav ? "&#9829;" : "&#9825;"}</span>
         </div>
       </div>
@@ -227,14 +263,13 @@ function renderDishList(container, dishes, showScore) {
   }).join("");
 }
 
-let _dishCache = [];
-function cacheDishes(arr) { arr.forEach((d) => { if (!_dishCache.find((c) => c.id === d.id)) _dishCache.push(d); }); }
 function toggleFavCard(id, el) {
   const dish = _dishCache.find((d) => d.id === id);
-  if (!dish) return;
+  if (!dish) { showToast("请重新加载菜品"); return; }
   const added = store.toggleFavorite(dish);
   el.innerHTML = added ? "&#9829;" : "&#9825;";
   el.classList.toggle("active", added);
+  showToast(added ? "已收藏" : "已取消收藏");
 }
 
 // ============================================================
@@ -251,7 +286,7 @@ function showDetail(dish) {
   $("#modal-content").innerHTML = `
     <div class="modal-top-bar">
       <button class="modal-fav-btn ${isFav ? "active" : ""}" id="modal-fav-btn" onclick="toggleModalFav()">${isFav ? "&#9829; 已收藏" : "&#9825; 收藏"}</button>
-      <button class="modal-close" onclick="closeDetail()">✕</button>
+      <button class="modal-close" onclick="closeDetail()">&#10005;</button>
     </div>
     <div class="modal-title">${dish.name}</div>
     <div class="modal-cuisine">${dish.cuisine} · ${dish.province}</div>
@@ -273,15 +308,19 @@ function showDetail(dish) {
   $("#modal-overlay").style.display = "flex";
   document.body.style.overflow = "hidden";
 }
+
 function toggleModalFav() {
   const dish = window._currentDetailDish; if (!dish) return;
   const added = store.toggleFavorite(dish);
   const btn = $("#modal-fav-btn");
   btn.innerHTML = added ? "&#9829; 已收藏" : "&#9825; 收藏";
   btn.classList.toggle("active", added);
+  showToast(added ? "已收藏" : "已取消收藏");
 }
+
 function closeDetail() { $("#modal-overlay").style.display = "none"; document.body.style.overflow = ""; }
 $("#modal-overlay").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeDetail(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
 
 // ============================================================
 //  发现页
@@ -298,7 +337,6 @@ async function initDiscover() {
   renderProvinceMap();
 }
 
-// 发现 Tab 切换
 $$(".discover-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     $$(".discover-tab").forEach((t) => t.classList.remove("active"));
@@ -308,7 +346,6 @@ $$(".discover-tab").forEach((tab) => {
   });
 });
 
-// --- 时令日历 ---
 const seasonColors = { spring: "#4caf50", summer: "#ff9800", autumn: "#e85d3a", winter: "#2196f3" };
 function renderSolarGrid(terms) {
   const grid = $("#solar-grid");
@@ -336,30 +373,29 @@ async function loadSeasonDishes(season, termName) {
   } catch {}
 }
 
-// --- 菜系地图 ---
 const PROVINCES_DATA = [
-  { name: "广东", emoji: "🥘", cuisine: "粤菜" },
-  { name: "四川", emoji: "🌶️", cuisine: "川菜" },
-  { name: "湖南", emoji: "🔥", cuisine: "湘菜" },
-  { name: "山东", emoji: "🐟", cuisine: "鲁菜" },
-  { name: "浙江", emoji: "🦐", cuisine: "浙菜" },
-  { name: "江苏", emoji: "🦀", cuisine: "苏菜" },
-  { name: "福建", emoji: "🫕", cuisine: "闽菜" },
-  { name: "安徽", emoji: "🏔️", cuisine: "徽菜" },
-  { name: "北京", emoji: "🦆", cuisine: "京菜" },
-  { name: "新疆", emoji: "🍖", cuisine: "西北菜" },
-  { name: "陕西", emoji: "🍜", cuisine: "西北菜" },
-  { name: "甘肃", emoji: "🥡", cuisine: "西北菜" },
-  { name: "云南", emoji: "🍄", cuisine: "云贵菜" },
-  { name: "贵州", emoji: "🫙", cuisine: "云贵菜" },
-  { name: "黑龙江", emoji: "🥟", cuisine: "东北菜" },
-  { name: "吉林", emoji: "🥘", cuisine: "东北菜" },
-  { name: "辽宁", emoji: "🍲", cuisine: "东北菜" },
-  { name: "广西", emoji: "🍝", cuisine: "地方小吃" },
-  { name: "湖北", emoji: "🥢", cuisine: "地方小吃" },
-  { name: "河南", emoji: "🥧", cuisine: "地方小吃" },
-  { name: "海南", emoji: "🐔", cuisine: "地方小吃" },
-  { name: "重庆", emoji: "🌶️", cuisine: "川菜" },
+  { name: "广东", emoji: "\u{1F372}", cuisine: "粤菜" },
+  { name: "四川", emoji: "\u{1F336}\uFE0F", cuisine: "川菜" },
+  { name: "湖南", emoji: "\u{1F525}", cuisine: "湘菜" },
+  { name: "山东", emoji: "\u{1F41F}", cuisine: "鲁菜" },
+  { name: "浙江", emoji: "\u{1F990}", cuisine: "浙菜" },
+  { name: "江苏", emoji: "\u{1F980}", cuisine: "苏菜" },
+  { name: "福建", emoji: "\u{1FAD5}", cuisine: "闽菜" },
+  { name: "安徽", emoji: "\u{26F0}\uFE0F", cuisine: "徽菜" },
+  { name: "北京", emoji: "\u{1F986}", cuisine: "京菜" },
+  { name: "新疆", emoji: "\u{1F356}", cuisine: "西北菜" },
+  { name: "陕西", emoji: "\u{1F35C}", cuisine: "西北菜" },
+  { name: "甘肃", emoji: "\u{1F961}", cuisine: "西北菜" },
+  { name: "云南", emoji: "\u{1F344}", cuisine: "云贵菜" },
+  { name: "贵州", emoji: "\u{1FAD9}", cuisine: "云贵菜" },
+  { name: "黑龙江", emoji: "\u{1F95F}", cuisine: "东北菜" },
+  { name: "吉林", emoji: "\u{1F372}", cuisine: "东北菜" },
+  { name: "辽宁", emoji: "\u{1F372}", cuisine: "东北菜" },
+  { name: "广西", emoji: "\u{1F35D}", cuisine: "地方小吃" },
+  { name: "湖北", emoji: "\u{1F962}", cuisine: "地方小吃" },
+  { name: "河南", emoji: "\u{1F967}", cuisine: "地方小吃" },
+  { name: "海南", emoji: "\u{1F414}", cuisine: "地方小吃" },
+  { name: "重庆", emoji: "\u{1F336}\uFE0F", cuisine: "川菜" },
 ];
 
 function renderProvinceMap() {
